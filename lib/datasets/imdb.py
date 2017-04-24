@@ -26,6 +26,11 @@ class imdb(object):
         self._roidb_handler = self.default_roidb
         # Use this dict for storing dataset specific config options
         self.config = {}
+        self._palette = {}
+
+    @property
+    def palette(self):
+        return self._palette
 
     @property
     def name(self):

@@ -35,11 +35,13 @@ class mask_voc(imdb):
                          'sheep', 'sofa', 'train', 'tvmonitor')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.jpg'
+        self._mask_ext = '.png'
         self._image_index = self._load_image_set_index()
         # Default to roidb handler
         self._roidb_handler = self.selective_search_roidb
         self._salt = str(uuid.uuid4())
         self._comp_id = 'comp4'
+        self._palette = self.getpallete(len(self._classes)+1) # BGR
 
         # PASCAL specific config options
         self.config = {'cleanup'     : True,
@@ -69,6 +71,22 @@ class mask_voc(imdb):
         assert os.path.exists(image_path), \
                 'Path does not exist: {}'.format(image_path)
         return image_path
+
+    def mask_path_at(self, i):
+        """
+        Return the absolute path to mask i in the image sequence.
+        """
+        return self.mask_path_from_index(self._image_index[i])
+
+    def mask_path_from_index(self, index):
+        """
+        Construct an image path from the image's "index" identifier.
+        """
+        mask_path = os.path.join(self._data_path, 'SegmentationClass',
+                                  index + self._mask_ext)
+        assert os.path.exists(mask_path), \
+                'Path does not exist: {}'.format(mask_path)
+        return mask_path
 
     def _load_image_set_index(self):
         """
@@ -217,12 +235,14 @@ class mask_voc(imdb):
 
         overlaps = scipy.sparse.csr_matrix(overlaps)
 
+        #Load segmentation mask
+        #mask_filename = os.path.join(self._data_path, 'SegmentationObject', index + '.png')
+
         return {'boxes' : boxes,
                 'gt_classes': gt_classes,
                 'gt_overlaps' : overlaps,
                 'flipped' : False,
                 'seg_areas' : seg_areas
-                'gt_mask': gt_mask
                 }
 
     def _get_comp_id(self):
@@ -339,8 +359,31 @@ class mask_voc(imdb):
             self.config['use_salt'] = True
             self.config['cleanup'] = True
 
+    def getpallete(self, num_cls):
+        # this function is to get the colormap for visualizing the segmentation mask
+        n = num_cls
+        pallete = [0]*(n*3)
+        for j in xrange(0,n):
+                lab = j
+                pallete[j*3+0] = 0
+                pallete[j*3+1] = 0
+                pallete[j*3+2] = 0
+                i = 0
+                while (lab > 0):
+                        pallete[j*3+2] |= (((lab >> 0) & 1) << (7-i))
+                        pallete[j*3+1] |= (((lab >> 1) & 1) << (7-i))
+                        pallete[j*3+0] |= (((lab >> 2) & 1) << (7-i))
+                        i = i + 1
+                        lab >>= 3
+        pallete = np.array(pallete).reshape(num_cls, 3)
+        pallete = map(lambda x: tuple(x), pallete)
+        ret = {(192, 224, 224): 255}
+        for id, x in enumerate(pallete):
+            ret[x] = id
+        return ret
+
 if __name__ == '__main__':
-    from datasets.pascal_voc import pascal_voc
-    d = pascal_voc('trainval', '2007')
+    from datasets.mask_voc import mask_voc
+    d = mask_voc('trainval', '2007')
     res = d.roidb
     from IPython import embed; embed()

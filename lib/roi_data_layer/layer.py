@@ -97,6 +97,10 @@ class RoIDataLayer(caffe.Layer):
         self._name_to_top_map['data'] = idx
         idx += 1
 
+        #add mask
+        self._name_to_top_map['mask'] = idx
+        idx += 1
+
         if cfg.TRAIN.HAS_RPN:
             top[idx].reshape(1, 3)
             self._name_to_top_map['im_info'] = idx
