@@ -17,6 +17,8 @@ import numpy as np
 import yaml
 from multiprocessing import Process, Queue
 
+DEBUG = False
+
 class RoIDataLayer(caffe.Layer):
     """Fast R-CNN data layer used for training."""
 
@@ -60,7 +62,7 @@ class RoIDataLayer(caffe.Layer):
         else:
             db_inds = self._get_next_minibatch_inds()
             minibatch_db = [self._roidb[i] for i in db_inds]
-            return get_minibatch(minibatch_db, self._num_classes)
+            return get_minibatch(minibatch_db, self._num_classes, self._mask_size)
 
     def set_roidb(self, roidb):
         """Set the roidb to be used by this layer during training."""
@@ -70,7 +72,8 @@ class RoIDataLayer(caffe.Layer):
             self._blob_queue = Queue(10)
             self._prefetch_process = BlobFetcher(self._blob_queue,
                                                  self._roidb,
-                                                 self._num_classes)
+                                                 self._num_classes,
+                                                 self._mask_size)
             self._prefetch_process.start()
             # Terminate the child process when the parent exists
             def cleanup():
@@ -87,7 +90,8 @@ class RoIDataLayer(caffe.Layer):
         layer_params = yaml.load(self.param_str_)
 
         self._num_classes = layer_params['num_classes']
-
+        self._mask_size = layer_params['mask_size']
+        #print 'mask_size:{}'.format(self._mask_size)
         self._name_to_top_map = {}
 
         # data blob: holds a batch of N images, each with 3 channels
@@ -98,8 +102,6 @@ class RoIDataLayer(caffe.Layer):
         idx += 1
 
         #add mask
-        self._name_to_top_map['mask'] = idx
-        idx += 1
 
         if cfg.TRAIN.HAS_RPN:
             top[idx].reshape(1, 3)
@@ -108,6 +110,8 @@ class RoIDataLayer(caffe.Layer):
 
             top[idx].reshape(1, 4)
             self._name_to_top_map['gt_boxes'] = idx
+            idx += 1
+            self._name_to_top_map['mask'] = idx
             idx += 1
         else: # not using RPN
             # rois blob: holds R regions of interest, each is a 5-tuple
@@ -140,6 +144,7 @@ class RoIDataLayer(caffe.Layer):
                 self._name_to_top_map['bbox_outside_weights'] = idx
                 idx += 1
 
+
         print 'RoiDataLayer: name_to_top:', self._name_to_top_map
         assert len(top) == len(self._name_to_top_map)
 
@@ -147,12 +152,16 @@ class RoIDataLayer(caffe.Layer):
         """Get blobs and copy them into this layer's top blob vector."""
         blobs = self._get_next_minibatch()
 
+        assert blobs['mask'].shape[2:] == (self._mask_size, self._mask_size)
         for blob_name, blob in blobs.iteritems():
             top_ind = self._name_to_top_map[blob_name]
             # Reshape net's input blobs
             top[top_ind].reshape(*(blob.shape))
             # Copy data into net's input blobs
             top[top_ind].data[...] = blob.astype(np.float32, copy=False)
+            if DEBUG:
+                print 'blob name: {}'.format(blob_name)
+                print 'blob shape: {}'.format(blob.shape)
 
     def backward(self, top, propagate_down, bottom):
         """This layer does not propagate gradients."""
@@ -164,11 +173,12 @@ class RoIDataLayer(caffe.Layer):
 
 class BlobFetcher(Process):
     """Experimental class for prefetching blobs in a separate process."""
-    def __init__(self, queue, roidb, num_classes):
+    def __init__(self, queue, roidb, num_classes, mask_size):
         super(BlobFetcher, self).__init__()
         self._queue = queue
         self._roidb = roidb
         self._num_classes = num_classes
+        self._mask_size = mask_size
         self._perm = None
         self._cur = 0
         self._shuffle_roidb_inds()
@@ -196,5 +206,5 @@ class BlobFetcher(Process):
         while True:
             db_inds = self._get_next_minibatch_inds()
             minibatch_db = [self._roidb[i] for i in db_inds]
-            blobs = get_minibatch(minibatch_db, self._num_classes)
+            blobs = get_minibatch(minibatch_db, self._num_classes, self._mask_size)
             self._queue.put(blobs)

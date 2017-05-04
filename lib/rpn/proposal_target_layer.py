@@ -25,6 +25,9 @@ class ProposalTargetLayer(caffe.Layer):
         layer_params = yaml.load(self.param_str_)
         self._num_classes = layer_params['num_classes']
 
+        self._count = 0
+        self._fg_num = 0
+        self._bg_num = 0
         # sampled rois (0, x1, y1, x2, y2)
         top[0].reshape(1, 5)
         # labels
@@ -36,6 +39,8 @@ class ProposalTargetLayer(caffe.Layer):
         # bbox_outside_weights
         top[4].reshape(1, self._num_classes * 4)
 
+        #top[5].reshape()
+
     def forward(self, bottom, top):
         # Proposal ROIs (0, x1, y1, x2, y2) coming from RPN
         # (i.e., rpn.proposal_layer.ProposalLayer), or any other source
@@ -44,6 +49,8 @@ class ProposalTargetLayer(caffe.Layer):
         # TODO(rbg): it's annoying that sometimes I have extra info before
         # and other times after box coordinates -- normalize to one format
         gt_boxes = bottom[1].data
+
+        masks = bottom[2].data
 
         # Include ground-truth boxes in the set of candidate rois
         zeros = np.zeros((gt_boxes.shape[0], 1), dtype=gt_boxes.dtype)
@@ -61,11 +68,12 @@ class ProposalTargetLayer(caffe.Layer):
 
         # Sample rois with classification labels and bounding box regression
         # targets
-        labels, rois, bbox_targets, bbox_inside_weights = _sample_rois(
+        labels, rois, bbox_targets, bbox_inside_weights, gt_masks = _sample_rois(
             all_rois, gt_boxes, fg_rois_per_image,
-            rois_per_image, self._num_classes)
+            rois_per_image, self._num_classes, masks[0])
 
         if DEBUG:
+            print '============== ProposalTargetLayer ================='
             print 'num fg: {}'.format((labels > 0).sum())
             print 'num bg: {}'.format((labels == 0).sum())
             self._count += 1
@@ -74,6 +82,19 @@ class ProposalTargetLayer(caffe.Layer):
             print 'num fg avg: {}'.format(self._fg_num / self._count)
             print 'num bg avg: {}'.format(self._bg_num / self._count)
             print 'ratio: {:.3f}'.format(float(self._fg_num) / float(self._bg_num))
+            #print 'mask shape:{}'.format(gt_mask.shape)
+            print 'rois shape: {}'.format(rois.shape)
+            print 'label shape: {}'.format(labels.shape)
+            print 'rois mask shape: {}'.format(masks.shape)
+            print 'rois gt_mask shape: {}'.format(gt_masks.shape)
+            #print 'rois 1: {}'.format(rois[0])
+            #print 'gt_rois 1: {}'.format(gt_rois[0])
+            #print 'gt_bbx 1: {}'.format(gt_boxes[0])
+
+            #print 'mask 1: {}'.format(masks[0].shape)
+            #print 'label top5: {}'.format(labels[:5])
+            #lo = np.where(gt_mask>0)
+            #print gt_mask[lo]
 
         # sampled rois
         top[0].reshape(*rois.shape)
@@ -94,6 +115,9 @@ class ProposalTargetLayer(caffe.Layer):
         # bbox_outside_weights
         top[4].reshape(*bbox_inside_weights.shape)
         top[4].data[...] = np.array(bbox_inside_weights > 0).astype(np.float32)
+
+        top[5].reshape(*gt_masks.shape)
+        top[5].data[...] = gt_masks
 
     def backward(self, top, propagate_down, bottom):
         """This layer does not propagate gradients."""
@@ -144,7 +168,7 @@ def _compute_targets(ex_rois, gt_rois, labels):
     return np.hstack(
             (labels[:, np.newaxis], targets)).astype(np.float32, copy=False)
 
-def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_classes):
+def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_classes, masks):
     """Generate a random sample of RoIs comprising foreground and background
     examples.
     """
@@ -183,11 +207,14 @@ def _sample_rois(all_rois, gt_boxes, fg_rois_per_image, rois_per_image, num_clas
     # Clamp labels for the background RoIs to 0
     labels[fg_rois_per_this_image:] = 0
     rois = all_rois[keep_inds]
-
+    #rois_mask = rois
+    #rois_mask = map(lambda x: masks[x[1]:x[2], x[3]:x[4]], rois_mask[:])
+    #rois_mask = np.array(rois_mask)
     bbox_target_data = _compute_targets(
         rois[:, 1:5], gt_boxes[gt_assignment[keep_inds], :4], labels)
 
     bbox_targets, bbox_inside_weights = \
         _get_bbox_regression_labels(bbox_target_data, num_classes)
 
-    return labels, rois, bbox_targets, bbox_inside_weights
+    gt_masks = masks[gt_assignment][keep_inds]
+    return labels, rois, bbox_targets, bbox_inside_weights, gt_masks

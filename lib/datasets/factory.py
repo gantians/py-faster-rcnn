@@ -34,7 +34,7 @@ for year in ['2015']:
 
 mask_voc_name = 'voc_2007_trainval_mask'
 mask_coco_name = 'coco_2014_trainval_mask'
-__sets[mask_voc] = mask_voc('trainval', '2007')
+__sets[mask_voc_name] = mask_voc('trainval', '2007')
 #__sets[mask_coco] = mask_coco('trainval', '2014')
 
 def get_imdb(name):

@@ -13,7 +13,9 @@ import cv2
 from fast_rcnn.config import cfg
 from utils.blob import prep_im_for_blob, im_list_to_blob, prep_mask_for_blob, mask_list_to_blob
 
-def get_minibatch(roidb, num_classes):
+DEBUG = False
+
+def get_minibatch(roidb, num_classes, mask_size):
     """Given a roidb, construct a minibatch sampled from it."""
     num_images = len(roidb)
     # Sample random scales to use for each image in this batch
@@ -30,8 +32,12 @@ def get_minibatch(roidb, num_classes):
 
     blobs = {'data': im_blob}
 
-    mask_blob, im_scales = _get_mask_blob(roidb, random_scale_inds)
+    mask_blob = _get_mask_blob(roidb, mask_size)
     blobs['mask'] = mask_blob
+    if DEBUG:
+        print 'input data shape:{}'.format(im_blob.shape)
+        print 'input mask shape:{}'.format(mask_blob.shape)
+        print 'input roidb boxes num:{}'.format(len(roidb[0]['boxes']))
 
     if cfg.TRAIN.HAS_RPN:
         assert len(im_scales) == 1, "Single batch only"
@@ -154,26 +160,49 @@ def _get_image_blob(roidb, scale_inds):
 
     return blob, im_scales
 
-def _get_mask_blob(roidb, scale_inds):
+def _get_mask_blob(roidb, mask_size):
     """Builds an mask input blob from the images in the roidb at the specified
     scales.
     """
     num_images = len(roidb)
-    processed_ims = []
-    im_scales = []
+    all_mask = []
+    max_box = 0
     for i in xrange(num_images):
         im = cv2.imread(roidb[i]['mask'])
         if roidb[i]['flipped']:
             im = im[:, ::-1, :]
-        target_size = cfg.TRAIN.SCALES[scale_inds[i]]
-        im, im_scale = prep_mask_for_blob(roidb.palette, im, target_size, cfg.TRAIN.MAX_SIZE)
-        im_scales.append(im_scale)
-        processed_ims.append(im)
 
+        gt_inds = np.where(roidb[i]['gt_classes'] != 0)[0]
+        gt_boxes = np.empty((len(gt_inds), 5), dtype=np.float32)
+        gt_boxes[:, 0:4] = roidb[i]['boxes'][gt_inds, :]
+        gt_boxes[:, 4] = roidb[i]['gt_classes'][gt_inds]
+        num_box = len(gt_inds)
+        if DEBUG:
+            print 'num box:{}'.format(num_box)
+        if num_box > max_box:
+            max_box = num_box
+        mask_ = []
+        for j in xrange(num_box):
+            mask = prep_mask_for_blob(roidb[i]['palette'], im, gt_boxes[j], mask_size)
+            if DEBUG:
+                print 'im shape:{}'.format(im.shape)
+                print 'box:{}'.format(gt_boxes[j])
+                print 'mask size:{}'.format(mask_size)
+                print 'mask shape:{}'.format(mask.shape)
+            assert mask.shape == (mask_size, mask_size)
+            mask_.append(mask)
+        all_mask.append(mask_)
+
+    blob = np.zeros((num_images, max_box, mask_size, mask_size))
+    for i in xrange(num_images):
+        num_box = len(all_mask[i])
+        for j in xrange(num_box):
+            im = all_mask[i][j]
+            blob[i, j, :, :] = im
+    return blob
     # Create a blob to hold the input images
-    blob = mask_list_to_blob(processed_ims)
 
-    return blob, im_scales
+    #return blob, im_scales
 
 def _project_im_rois(im_rois, im_scale_factor):
     """Project image RoIs into the rescaled training image."""

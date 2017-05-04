@@ -19,6 +19,7 @@ class imdb(object):
     def __init__(self, name):
         self._name = name
         self._num_classes = 0
+        self._mask_size = 14
         self._classes = []
         self._image_index = []
         self._obj_proposer = 'selective_search'
@@ -84,6 +85,9 @@ class imdb(object):
       return len(self.image_index)
 
     def image_path_at(self, i):
+        raise NotImplementedError
+
+    def mask_path_at(self, i):
         raise NotImplementedError
 
     def default_roidb(self):
